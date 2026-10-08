@@ -2087,7 +2087,7 @@
                         .catch(err => {
                             console.warn(`视频 ${video.id} 自动播放失败，可能受浏览器策略限制：`, err);
                             // 失败时可添加用户交互触发播放（如点击封面）
-                            video.poster = "./cover.jpg"; // 显示封面图
+                            video.poster = "./static/images/logo.png"; // 显示封面图
                             video.addEventListener('click', () => video.play(), { once: true });
                         });
                 } else {
