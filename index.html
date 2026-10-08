@@ -2061,55 +2061,77 @@
 
     <script>
         const videos = document.querySelectorAll('.auto-play-video');
-        const activeVideos = new Set();
-        const maxConcurrentVideos = 8;
+        let playbackUpdatePending = false;
 
-        const playVideo = async (video) => {
-            if (!video.paused) return;
-
-            while (activeVideos.size >= maxConcurrentVideos) {
-                const oldestVideo = activeVideos.values().next().value;
-                oldestVideo.pause();
-                activeVideos.delete(oldestVideo);
-            }
-
-            try {
-                await video.play();
-                activeVideos.add(video);
-            } catch (error) {
-                // AbortError is transient and can occur while scrolling quickly.
-                if (error.name !== 'AbortError') {
-                    video.controls = true;
-                    console.warn('Video autoplay failed; controls were enabled.', error);
-                }
-            }
+        const isInViewport = (video) => {
+            const rect = video.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0 &&
+                rect.bottom > 0 && rect.top < window.innerHeight &&
+                rect.right > 0 && rect.left < window.innerWidth;
         };
 
-        const observerOptions = {
-            root: null,
-            rootMargin: '100px 0px',
-            threshold: 0.01
-        };
+        const updateVisibleVideoPlayback = async () => {
+            playbackUpdatePending = false;
+            const visibleVideos = Array.from(videos).filter(isInViewport);
+            const visibleSet = new Set(visibleVideos);
 
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                const video = entry.target;
-                if (entry.isIntersecting) {
-                    playVideo(video);
-                } else {
-                    video.pause();
-                    activeVideos.delete(video);
+            videos.forEach(video => {
+                if (!visibleSet.has(video)) video.pause();
+            });
+
+            // Start every visible video in the same frame. Explicit properties
+            // keep autoplay reliable across desktop and mobile browsers.
+            const playResults = await Promise.allSettled(visibleVideos.map(video => {
+                video.muted = true;
+                video.defaultMuted = true;
+                video.loop = true;
+                video.playsInline = true;
+                return video.play();
+            }));
+
+            playResults.forEach((result, index) => {
+                if (result.status === 'rejected' && result.reason.name !== 'AbortError') {
+                    visibleVideos[index].controls = true;
+                    console.warn('Video autoplay failed; controls were enabled.', result.reason);
                 }
             });
-        }, observerOptions);
+        };
+
+        const schedulePlaybackUpdate = () => {
+            if (playbackUpdatePending) return;
+            playbackUpdatePending = true;
+            requestAnimationFrame(updateVisibleVideoPlayback);
+        };
+
+        const observer = new IntersectionObserver(schedulePlaybackUpdate, {
+            root: null,
+            threshold: [0, 0.01]
+        });
 
         videos.forEach(video => {
+            video.muted = true;
+            video.defaultMuted = true;
+            video.loop = true;
+            video.playsInline = true;
+            video.addEventListener('canplay', schedulePlaybackUpdate);
             video.addEventListener('error', () => {
                 video.controls = true;
                 console.error('Video failed to load:', video.currentSrc);
             });
             observer.observe(video);
         });
+
+        window.addEventListener('scroll', schedulePlaybackUpdate, { passive: true });
+        window.addEventListener('resize', schedulePlaybackUpdate, { passive: true });
+        window.addEventListener('pageshow', schedulePlaybackUpdate);
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                videos.forEach(video => video.pause());
+            } else {
+                schedulePlaybackUpdate();
+            }
+        });
+        schedulePlaybackUpdate();
     </script>
 
 
